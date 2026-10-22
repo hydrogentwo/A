@@ -23,7 +23,12 @@
 - **Cluster** (`src/cluster`) — isomorphic capacity scoring + catalog/policy + wire
   protocol + scheduler; shared verbatim by browser, CLI and VPS (the VPS serves
   `src/` modules to the browser). Headless node runner for `a join`/`a simnode`.
-- **VPS** (`src/vps`) — store (append-only JSONL + files) + coordinator server.
+- **VPS** (`src/vps`) — store (append-only JSONL + files) + coordinator server +
+  **commander auth** (scrypt accounts, hashed sessions, viewer/operator/admin;
+  gates every commanding API + the console WS while nodes join by cluster token).
+- **Quant** (`src/quant`) — Unsloth-Dynamic-style recipes (per-tensor llama.cpp
+  overrides + imatrix calibration + PPL validation) and the job/registry engine
+  whose outputs merge into the served model catalog per capacity tier.
 
 ## Key invariants
 1. **Model-visible ⇒ logged** (DeepSeek): every prompt, tool call and result lands in a
@@ -34,7 +39,9 @@
    tier unless the operator explicitly overrides it in the console.
 4. **Policy is data, pushed live**: model-per-capacity lives on the VPS (`policy.json`)
    and broadcasts to nodes; per-node pins override tiers.
-5. **Tools are equal**: core, MCP, Pi-extension, OpenCode and skill tools share one
+5. **Command is authenticated, work is not**: anything that moves the fleet needs
+   a commander session (or the cluster token for machines); joining as a worker never does.
+6. **Tools are equal**: core, MCP, Pi-extension, OpenCode and skill tools share one
    registry and one guardrail/hook pipeline.
 
 ## Scheduling

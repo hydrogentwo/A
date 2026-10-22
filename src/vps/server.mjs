@@ -12,6 +12,9 @@ import { Scheduler } from "../cluster/scheduler.mjs";
 import { CATALOG, TIER_INFO, resolveModelForNode } from "../cluster/catalog.mjs";
 import { msg, parse, newTaskId } from "../cluster/protocol.mjs";
 import { providerFromEnv } from "../core/providers.mjs";
+import { Auth, roleRank, sessionTokenFromRequest, sessionCookie, clearCookie } from "./auth.mjs";
+import { QuantJobs, detectTools } from "../quant/suite.mjs";
+import { RECIPES } from "../quant/recipes.mjs";
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "web");
 const SRC = join(dirname(fileURLToPath(import.meta.url)), ".."); // serve isomorphic modules to browser
@@ -26,12 +29,27 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
   const relay = providerFromEnv(); // model for T0 nodes (demo unless configured)
   await store.event("vps:start", { port, relay: relay.id });
 
+  const auth = await new Auth(store).init();              // commander login for the Swarm Console
+  const quantTools = detectTools();
+  let registryCache = [];
   const pub = n => ({ ...n, ws: undefined });
   const snapshot = () => ({ nodes: [...nodes.values()].map(pub), tasks: [...tasks.values()].slice(-100),
-    policy: store.policy, catalog: CATALOG, tiers: TIER_INFO, strategy: scheduler.strategy,
-    maxConcurrentPerNode: scheduler.maxConcurrentPerNode, relay: relay.id });
+    policy: store.policy, catalog: [...CATALOG, ...registryCache], tiers: TIER_INFO, strategy: scheduler.strategy,
+    maxConcurrentPerNode: scheduler.maxConcurrentPerNode, relay: relay.id,
+    authEnabled: auth.enabled, quant: { recipes: RECIPES, jobs: quant.list(), registry: registryCache, tools: quantTools } });
   const toUIs = (type, data) => { const s = msg(type, data); for (const ws of uis) try { ws.send(s); } catch {} };
   const broadcastState = () => toUIs("snapshot", snapshot());
+  const quant = await new QuantJobs(store, { onChange: async () => { registryCache = await quant.registry().catch(() => registryCache); broadcastState(); } }).init();
+  registryCache = await quant.registry().catch(() => []);
+  const resolveAnyModel = node => { const m = resolveModelForNode(node, store.policy);
+    const id = typeof m === "string" ? m : m?.id; return registryCache.find(r => r.id === id) || m; };
+  // Identity for commander APIs: cluster-token (machines/scripts) or a login session.
+  function identity(req) {
+    const tok = req.headers["x-a-token"] || new URL(req.url, "http://x").searchParams.get("token");
+    if (token && tok === token) return { username: "(cluster-token)", role: "admin", via: "token" };
+    const u = auth.userFromToken(sessionTokenFromRequest(req));
+    return u ? { ...auth.publicUser(u), _user: u, via: "session" } : null;
+  }
 
   function tryDispatch() {
     for (const task of tasks.values()) {
@@ -61,7 +79,44 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
       { res.writeHead(code, { "content-type": type, "cache-control": "no-store" }); res.end(typeof body === "string" ? body : JSON.stringify(body)); };
     const body = async () => { let b = ""; for await (const c of req) b += c; try { return JSON.parse(b || "{}"); } catch { return {}; } };
     try {
-      if (url.pathname.startsWith("/api/") && !authed(req)) return send(401, { error: "bad cluster token" });
+      // ---- commander auth gate (Swarm Console APIs) ----
+      const P = url.pathname, isPost = req.method === "POST";
+      const nodeAPI = P === "/api/chat" || P === "/api/artifact";       // workers: cluster-token rules only
+      if (nodeAPI && !authed(req)) return send(401, { error: "bad cluster token" });
+      if (P.startsWith("/api/") && !P.startsWith("/api/auth/") && !nodeAPI) {
+        const needRole = (isPost && ["/api/tasks", "/api/policy", "/api/control"].includes(P)) || (P === "/api/quant/jobs" && isPost) ? "operator" : "viewer";
+        if (auth.enabled) { const id = identity(req);
+          if (!id || roleRank(id.role) < roleRank(needRole)) return send(401, { error: `login required (${needRole}+)`, needsSetup: auth.needsSetup() });
+          req._id = id;
+        } else if (!authed(req)) return send(401, { error: "bad cluster token" });
+      }
+      // ---- auth endpoints ----
+      if (P === "/api/auth/me") { const id = identity(req);
+        return send(200, { authEnabled: auth.enabled, needsSetup: auth.needsSetup(), user: id ? { username: id.username, role: id.role } : null }); }
+      if (P === "/api/auth/setup" && isPost) { const b = await body();
+        try { const s = await auth.setup(b.username, b.password, b.setupToken); res.setHeader("set-cookie", sessionCookie(s.token, req)); return send(200, { user: s.user }); }
+        catch (e) { return send(400, { error: e.message }); } }
+      if (P === "/api/auth/login" && isPost) { const b = await body();
+        try { const s = await auth.login(b.username, b.password, req.socket.remoteAddress || "?"); res.setHeader("set-cookie", sessionCookie(s.token, req)); return send(200, { user: s.user }); }
+        catch (e) { return send(401, { error: e.message }); } }
+      if (P === "/api/auth/logout" && isPost) { await auth.logout(sessionTokenFromRequest(req)); res.setHeader("set-cookie", clearCookie()); return send(200, { ok: true }); }
+      if (P === "/api/auth/password" && isPost) { const id = identity(req); if (!id?._user) return send(401, { error: "login required" });
+        const b = await body(); try { await auth.setPassword(id._user, b.oldPassword, b.newPassword); return send(200, { ok: true }); } catch (e) { return send(400, { error: e.message }); } }
+      if (P === "/api/auth/users") { const id = identity(req); if (!id || roleRank(id.role) < roleRank("admin")) return send(401, { error: "admin login required" });
+        if (!isPost) return send(200, { users: auth.listUsers() });
+        const b = await body(); try {
+          if (b.action === "delete") { await auth.deleteUser(id, b.username); return send(200, { ok: true }); }
+          return send(200, { user: await auth.createUser(id, b.username, b.password, b.role || "operator") });
+        } catch (e) { return send(400, { error: e.message }); } }
+      // ---- quant suite endpoints (commander) ----
+      if (P === "/api/quant/jobs") {
+        if (!isPost) return send(200, { jobs: quant.list(), recipes: RECIPES, tools: quantTools });
+        const b = await body();
+        try { const job = await quant.create({ model: b.model, recipeIds: b.recipeIds, paramsB: b.paramsB, layers: b.layers,
+          imatrix: b.imatrix !== false, calibration: b.calibration, dryRun: !!b.dryRun, outDir: b.outDir }, req._id?.username || "operator");
+          return send(200, { jobId: job.id, status: job.status }); }
+        catch (e) { return send(400, { error: e.message }); } }
+      if (P === "/api/quant/registry") return send(200, { registry: registryCache });
       if (url.pathname === "/api/state") return send(200, { ...snapshot(), store: await store.stats(), events: await store.events(50) });
       if (url.pathname === "/api/tasks" && req.method === "POST") {
         const b = await body(); const now = Date.now(); const created = [];
@@ -77,7 +132,7 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
       }
       if (url.pathname === "/api/policy" && req.method === "POST") {
         const p = await store.savePolicy(await body()); scheduler.policy = p;
-        for (const n of nodes.values()) { n.model = resolveModelForNode(n, p); try { n.ws?.send(msg("policy:update", { policy: p, model: n.model })); } catch {} }
+        for (const n of nodes.values()) { n.model = resolveAnyModel(n); try { n.ws?.send(msg("policy:update", { policy: p, model: n.model })); } catch {} }
         await store.event("policy:update", { version: p.version }); broadcastState(); return send(200, p);
       }
       if (url.pathname === "/api/control" && req.method === "POST") {
@@ -88,7 +143,7 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
         if (b.action === "node-message") { const n = nodes.get(b.nodeId); try { n?.ws?.send(msg("operator:message", { text: b.text })); } catch {} }
         if (b.action === "broadcast-message") for (const n of nodes.values()) try { n.ws?.send(msg("operator:message", { text: b.text })); } catch {}
         if (b.action === "node-model") { const n = nodes.get(b.nodeId); if (n) { store.policy.overrides = { ...(store.policy.overrides || {}), [n.id]: b.model }; await store.savePolicy(store.policy);
-          n.model = resolveModelForNode(n, store.policy); try { n.ws?.send(msg("model:set", { model: n.model })); } catch {} } }
+          n.model = resolveAnyModel(n); try { n.ws?.send(msg("model:set", { model: n.model })); } catch {} } }
         if (b.action === "pause-all" || b.action === "resume-all") for (const n of nodes.values()) { n.paused = b.action === "pause-all"; if (n.paused) n.status = "paused"; else if (n.status === "paused") n.status = "idle"; }
         broadcastState(); return send(200, { ok: true });
       }
@@ -111,15 +166,16 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
 
   const wss = new WebSocketServer({ server: http, path: "/ws" });
   wss.on("connection", (ws, req) => {
-    if (!authed(req)) { ws.close(4401, "bad token"); return; }
     const role = new URL(req.url, "http://x").searchParams.get("role") || "node";
+    if (role === "ui" && auth.enabled) { if (!identity(req)) { ws.close(4401, "login required"); return; } }
+    else if (!authed(req)) { ws.close(4401, "bad token"); return; }
     if (role === "ui") { uis.add(ws); ws.send(msg("snapshot", snapshot())); ws.on("close", () => uis.delete(ws)); return; }
     let node = null;
     ws.on("message", async raw => {
       const m = parse(raw); if (!m) return;
       if (m.type === "hello") {
         node = { ...m.node, ws, status: "idle", assigned: 0, joinedAt: Date.now(), lastSeen: Date.now(), stats: m.node.stats || {} };
-        node.model = resolveModelForNode(node, store.policy); nodes.set(node.id, node);
+        node.model = resolveAnyModel(node); nodes.set(node.id, node);
         await store.event("node:join", { nodeId: node.id, kind: node.kind, tier: node.capacity?.tier, model: node.model?.id || node.model });
         ws.send(msg("welcome", { nodeId: node.id, policy: store.policy, model: node.model }));
         tryDispatch(); return;
@@ -136,10 +192,16 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
       for (const t of tasks.values()) if (t.nodeId === node.id && ["assigned"].includes(t.status)) { t.status = "queued"; t.nodeId = null; }
       node.assigned = 0; setTimeout(() => { if (nodes.get(node.id)?.status === "offline") nodes.delete(node.id); broadcastState(); }, 60_000); tryDispatch(); });
   });
-  setInterval(() => { const now = Date.now(); for (const n of nodes.values()) if (n.status !== "offline" && now - (n.lastSeen || 0) > 45_000) n.status = "offline"; broadcastState(); }, 15_000);
+  const hbTimer = setInterval(() => { const now = Date.now(); for (const n of nodes.values()) if (n.status !== "offline" && now - (n.lastSeen || 0) > 45_000) n.status = "offline"; broadcastState(); }, 15_000);
+  hbTimer.unref?.();
 
   await new Promise(r => http.listen(port, host, r));
   console.log(`⬢ A VPS coordinator → http://${host}:${port}  (open in any browser to join the cluster; /swarm = console)`);
   if (!token) console.log("⚠  A_CLUSTER_TOKEN unset — open cluster (dev/LAN only). Set it on a public VPS.");
-  return { http, wss, store, nodes, tasks };
+  const close = async () => { clearInterval(hbTimer); for (const ws of [...uis]) try { ws.close(); } catch {}
+    try { for (const n of nodes.values()) n.ws?.close(); } catch {}
+    http.closeIdleConnections?.();
+    await Promise.race([new Promise(r => wss.close(() => r())), new Promise(r => setTimeout(r, 1500))]);
+    await Promise.race([new Promise(r => http.close(() => r())), new Promise(r => setTimeout(r, 1500))]); };
+  return { http, wss, store, nodes, tasks, auth, quant, close };
 }

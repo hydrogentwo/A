@@ -56,6 +56,16 @@
 
 <!-- ============ SWARM VIEW (Orca inspired) ============ -->
 <main id="view-swarm" class="hidden">
+  <div id="auth-gate" class="card hidden" style="max-width:430px;margin:48px auto;width:100%">
+    <h3 id="auth-title">⬢ Commander login</h3>
+    <p class="dim small" id="auth-blurb">The Swarm Console commands the whole fleet — login required. Worker devices joining as nodes don't need an account.</p>
+    <form id="auth-form">
+      <label class="small dim">Username<input id="auth-user" autocomplete="username" required></label>
+      <label class="small dim">Password (min 8 chars)<input id="auth-pass" type="password" autocomplete="current-password" required></label>
+      <label class="small dim hidden" id="auth-token-row">Setup token (if your VPS sets A_SETUP_TOKEN)<input id="auth-token" autocomplete="off"></label>
+      <div class="row"><button class="primary" type="submit" id="auth-go">Log in</button><span id="auth-err" class="small" style="color:var(--bad)"></span></div>
+    </form>
+  </div>
   <aside id="fleet">
     <h3>Fleet <span id="fleet-count" class="dim"></span></h3>
     <div id="node-cards"></div>

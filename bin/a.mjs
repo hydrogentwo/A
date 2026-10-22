@@ -19,7 +19,7 @@ import { CATALOG, DEFAULT_POLICY, TIER_INFO } from "../src/cluster/catalog.mjs";
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (n, d) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? (rest[i + 1]?.startsWith("--") ? true : rest[i + 1]) : d; };
 const has = n => rest.includes(`--${n}`);
-const VALUE_FLAGS = new Set(["cwd", "mode", "role", "port", "host", "url", "token", "n", "provider"]);
+const VALUE_FLAGS = new Set(["cwd", "mode", "role", "port", "host", "url", "token", "n", "provider", "recipes", "params", "layers", "user"]);
 const positional = [];
 for (let i = 0; i < rest.length; i++) {
   if (rest[i].startsWith("--")) { if (VALUE_FLAGS.has(rest[i].slice(2))) i++; continue; }
@@ -137,6 +137,51 @@ async function main() {
     await writeFile(join(dir, ".a/guardrails.json"), JSON.stringify({ rules: [{ action: "bash", match: "git push", decision: "ask", reason: "pushes need approval" }] }, null, 2));
     await writeFile(join(dir, "AGENTS.md"), "# Project instructions (AGENTS.md — read by A, Codex, OpenCode, Pi…)\n\nDescribe build/test commands and conventions here.\n");
     return console.log("✓ scaffolded .a/ + AGENTS.md in", dir); }
+  if (cmd === "login") {
+    const { mkdir, writeFile } = await import("node:fs/promises"); const { join } = await import("node:path"); const { homedir } = await import("node:os");
+    const base = flag("url", "http://127.0.0.1:8787"), user = flag("user", positional[0]);
+    if (!user) return console.error("usage: a login --url http://vps:8787 --user <name>  (password via A_PASSWORD)");
+    const password = process.env.A_PASSWORD || await new Promise(r => createInterface({ input: process.stdin, output: process.stdout }).question("password: ", a => r(a)));
+    const res = await fetch(base + "/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: user, password }) });
+    const cookie = res.headers.get("set-cookie") || ""; const m = cookie.match(/a_session=([^;]+)/);
+    if (!res.ok || !m) return console.error("login failed:", (await res.text()).slice(0, 200)), process.exit(1);
+    const dir = join(homedir(), ".a"); await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "credentials.json"), JSON.stringify({ url: base, user, token: decodeURIComponent(m[1]) }, null, 2), { mode: 0o600 });
+    return console.log(`✓ logged in as ${user} → ${base} (token in ~/.a/credentials.json)`);
+  }
+  if (cmd === "quant") {
+    const { RECIPES, estimateSizeMB, estimateBpw } = await import("../src/quant/recipes.mjs");
+    const { planQuant, QuantJobs, detectTools, INSTALL_HINT } = await import("../src/quant/suite.mjs");
+    const sub = positional[0];
+    if (sub === "recipes" || !sub) { const P = +(flag("params", 7));
+      console.log(`A-Quant Dynamic recipes (Unsloth Dynamic 2.0 style) — sizes for a ${P}B model:\n`);
+      RECIPES.forEach(r => console.log(`  ${r.id.padEnd(16)} tier ${r.tier}  base ${r.base.padEnd(7)} ≈${estimateBpw(r)} bpw  ≈${(estimateSizeMB(P, r) / 1024).toFixed(2)} GB  ${r.label}`));
+      const t = detectTools(); console.log(`\ntoolchain: hf=${t.hf} llama-quantize=${t.quantize} llama-imatrix=${t.imatrix} llama-perplexity=${t.perplexity} (A_LLAMA_CPP=${t.llamaDir})`);
+      return; }
+    const { readFile, writeFile, mkdir } = await import("node:fs/promises"); const { join } = await import("node:path");
+    const dir = join(process.cwd(), ".a"); await mkdir(dir, { recursive: true });
+    const lstore = { async readJSON(n, f) { try { return JSON.parse(await readFile(join(dir, n), "utf8")); } catch { return f; } },
+      async writeJSON(n, v) { await writeFile(join(dir, n), JSON.stringify(v, null, 2)); }, async event() {} };
+    if (sub === "list") { const reg = await lstore.readJSON("quant-registry.json", []);
+      reg.forEach(r => console.log(`· ${r.id} · tier ${r.tier} · ${r.downloadMB}MB · ${r.path}`)); return console.log(`${reg.length} variants (VPS registry lives in A_DATA; GUI shows both once served from here)`); }
+    const model = positional[1]; if (!model) return console.error("usage: a quant plan|run <hf-model>");
+    const opts = { model, recipeIds: String(flag("recipes", "A-UD-Q4_K_XL")).split(","), paramsB: flag("params") ? +flag("params") : undefined,
+      layers: +(flag("layers", 0)), imatrix: !has("no-imatrix"), dryRun: has("dry-run") };
+    if (sub === "plan") { const plan = planQuant(opts);
+      if (has("json")) return console.log(JSON.stringify(plan, null, 2));
+      console.log(`⬢ A-Quant plan — ${plan.model} (${plan.notes.join(" · ")})\n`);
+      plan.stages.forEach((s, i) => console.log(`${i + 1}. [${s.name}] ${s.argv.join(" ")}\n   ${s.why}`));
+      console.log("\nVariants:"); plan.variants.forEach(v => console.log(`  · ${v.file.split("/").pop()} → tier ${v.tier} · ≈${v.estSizeMB} MB · ≈${v.bpw} bpw`));
+      const t = detectTools(); if (!t.quantize) console.log("\n" + INSTALL_HINT);
+      return; }
+    if (sub === "run") { const jobs = await new QuantJobs(lstore).init();
+      const job = await jobs.create(opts, "cli");
+      while (!["planned", "done", "failed"].includes(job.status)) await new Promise(r => setTimeout(r, 500));
+      console.log(job.log.join("\n")); console.log(`\njob ${job.id}: ${job.status}${job.error ? " — " + job.error : ""}`);
+      job.results.forEach(r => console.log(`  · ${r.recipe}: ${r.status}${r.sizeMB ? ` (${r.sizeMB} MB${r.ppl ? `, PPL ${r.ppl}` : ""}) → ${r.registryId}` : ""}`));
+      process.exit(job.status === "failed" ? 1 : 0); }
+    return console.error("usage: a quant recipes|plan|run|list");
+  }
   console.error("unknown command:", cmd, "\n\n" + HELP); process.exit(1);
 }
 main().catch(e => { console.error("A error:", e.message); process.exit(1); });

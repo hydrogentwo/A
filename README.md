@@ -76,6 +76,24 @@ Behind Caddy for TLS (`deploy/Caddyfile`): `https://a.example.com/?token=…` is
 link; `/swarm` is the console. All state lives in one data dir (append-only event log,
 sessions, artifacts, policy). Details: [deploy/](deploy/) + [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Commander login (Swarm Console)
+The commanding `/swarm` GUI is gated by accounts that live only on your VPS
+(scrypt-hashed passwords, hashed sessions, audit-logged). Roles: **admin** (+
+manage users) · **operator** (command the fleet) · **viewer** (watch only).
+First run: create the first commander in the `/swarm` setup screen — or, better
+on a public VPS, bootstrap with `A_ADMIN_USER`/`A_ADMIN_PASSWORD` (see
+`deploy/.env.example`), which closes setup entirely. Worker nodes never need
+accounts; they still join with the cluster token. Scripts use `a login --url …`
+or the cluster token.
+
+## Quant Studio 🦥 (built on Unsloth's Dynamic quants)
+`a quant recipes|plan|run` and Swarm Console → **Quant Studio**: turn any HF
+model (or your Unsloth fine-tune) into per-tier Dynamic GGUFs — BF16 convert →
+imatrix calibration on chat/code data → per-tensor dynamic quantization
+(protect embeddings/down-proj/router, crush bulk experts) → perplexity
+validation → auto-registered into the catalog, ready to assign per capacity
+tier. Full detail + credits: [QUANT.md](QUANT.md).
+
 ## Security model
 Cluster token on every API/WS · guardrails-as-code (`allow|ask|deny`, secret paths denied
 by default) · optional `A_SANDBOX=1` (bubblewrap) on CLI nodes · Pi's honest trust model:

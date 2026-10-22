@@ -165,7 +165,7 @@ function renderSwarm() {
       <div class="small dim">${m?.label || m?.id || "—"} · ~${n.capacity?.estVramMB || 0} MB GPU · ${n.stats?.tokS || 0} tok/s · ✓${n.stats?.tasksDone || 0}</div>
       ${n.currentTask ? `<div class="small">🐝 ${n.currentTask}</div>` : ""}
       ${selectedNode === n.id ? `<div style="margin-top:8px">
-        <select data-model-for="${n.id}">${CATALOG.map(c => `<option value="${c.id}" ${c.id === (m?.id) ? "selected" : ""}>${c.tier} · ${c.label}</option>`).join("")}</select>
+        <select data-model-for="${n.id}">${(SNAP.catalog || CATALOG).map(c => `<option value="${c.id}" ${c.id === (m?.id) ? "selected" : ""}>${c.tier} · ${c.label}</option>`).join("")}</select>
         <div class="row"><button data-act="model" data-id="${n.id}">Set model</button>
         <input data-msg-for="${n.id}" placeholder="message node…" style="flex:1"><button data-act="msg" data-id="${n.id}">→</button></div></div>` : ""}
     </div>`; }).join("") || "<p class=dim>No nodes yet — open this page on another device.</p>";
@@ -179,7 +179,7 @@ function renderSwarm() {
     $("#policy-editor").dataset.built = "1"; $("#policy-editor").dataset.v = String(policy.version);
     $("#policy-editor").innerHTML = `<table><tr><th>Tier</th><th>Capacity</th><th>Specified model</th></tr>` + TIERS.map(t =>
       `<tr><td><strong>${t}</strong></td><td class="dim">${TIER_INFO[t].desc}</td><td><select data-tier="${t}">${
-        CATALOG.map(c => `<option value="${c.id}" ${policy.tiers[t] === c.id ? "selected" : ""}>${c.label} (${c.params})</option>`).join("")}</select></td></tr>`).join("") + "</table>";
+        (SNAP.catalog || CATALOG).map(c => `<option value="${c.id}" ${policy.tiers[t] === c.id ? "selected" : ""}>${c.label} (${c.params})</option>`).join("")}</select></td></tr>`).join("") + "</table>";
   }
   $("#board").innerHTML = [...tasks].reverse().slice(0, 24).map(t => `
     <div class="task"><h4><span class="st-${t.status}">● ${t.status}</span> ${t.id} <span class="dim">[${t.role}]${t.groupId ? " · broadcast " + t.groupId : ""}${t.nodeId ? " · " + t.nodeId : ""}</span></h4>
@@ -222,4 +222,4 @@ setInterval(async () => { try { const r = await api("/api/state"); const s = awa
 
 addMsg("sys", `⬢ A ready on ${nodeName}. Probing this device's maximum model capacity…`);
 bootNode().then(() => addMsg("sys", `Capacity tier ${myCapacity.tier} (${TIER_INFO[myCapacity.tier].name}). Chat now (relay) or load the model locally above.`)).catch(e => addMsg("sys", "probe error: " + e.message));
-bootUI();
+refreshMe(); // gates the Swarm Console behind commander login, then boots its live feed
