@@ -1,0 +1,14 @@
+services:
+  a-vps:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    restart: unless-stopped
+    environment:
+      - A_CLUSTER_TOKEN=${A_CLUSTER_TOKEN:?set A_CLUSTER_TOKEN}
+      - A_DATA=/data
+      # Relay model for T0 nodes (optional; demo if unset):
+      - A_PROVIDER=${A_PROVIDER:-demo}
+      - A_MODEL=${A_MODEL:-}
+      - A_API_KEY=${A_API_KEY:-}
+    volumes: [ "a-data:/data" ]
+    ports: [ "127.0.0.1:8787:8787" ]   # behind Caddy/nginx TLS (see Caddyfile)
+volumes: { a-data: {} }

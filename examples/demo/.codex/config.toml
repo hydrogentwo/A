@@ -1,0 +1,3 @@
+[mcp_servers.codex-echo]
+command = "node"
+args = ["../mcp-echo-server.mjs"]
