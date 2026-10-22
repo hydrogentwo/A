@@ -75,6 +75,15 @@
       <button id="copy-join">Copy join link</button>
     </div>
     <div class="card mini"><h4>Event log</h4><div id="event-log" class="log small"></div></div>
+    <div class="card mini hidden" id="users-card">
+      <h4>Commanders (admin)</h4>
+      <div id="user-list" class="small"></div>
+      <input id="nu-name" placeholder="new username">
+      <input id="nu-pass" type="password" placeholder="password (min 8)">
+      <div class="row"><select id="nu-role" style="flex:1"><option>operator</option><option>viewer</option><option>admin</option></select>
+      <button id="nu-go">Add user</button></div>
+      <p class="dim small">operator = command the fleet · viewer = watch only · admin = + manage users</p>
+    </div>
   </aside>
 
   <section id="swarm-main">
