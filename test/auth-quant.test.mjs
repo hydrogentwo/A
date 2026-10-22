@@ -97,6 +97,6 @@ test("server: Swarm APIs are login-gated; commander flow works; cluster token st
     assert.equal((await fetch(base + "/api/tasks", { method: "POST", headers: { ...J, "x-a-token": "fleet-secret" }, body: JSON.stringify({ prompt: "ping" }) })).status, 200);
     // snapshot carries quant studio data
     const state = await (await fetch(base + "/api/state", { headers: { cookie } })).json();
-    assert.ok(state.quant.recipes.length >= 7 && "tools" in state.quant);
+    assert.ok(state.quant.recipes.gguf.length >= 7 && state.quant.recipes.web.length >= 4 && "tools" in state.quant);
   } finally { await srv.close(); }
 });

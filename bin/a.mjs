@@ -19,7 +19,7 @@ import { CATALOG, DEFAULT_POLICY, TIER_INFO } from "../src/cluster/catalog.mjs";
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (n, d) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? (rest[i + 1]?.startsWith("--") ? true : rest[i + 1]) : d; };
 const has = n => rest.includes(`--${n}`);
-const VALUE_FLAGS = new Set(["cwd", "mode", "role", "port", "host", "url", "token", "n", "provider", "recipes", "params", "layers", "user"]);
+const VALUE_FLAGS = new Set(["cwd", "mode", "role", "port", "host", "url", "token", "n", "provider", "recipes", "params", "layers", "user", "target", "runtime", "pi-bin"]);
 const positional = [];
 for (let i = 0; i < rest.length; i++) {
   if (rest[i].startsWith("--")) { if (VALUE_FLAGS.has(rest[i].slice(2))) i++; continue; }
@@ -56,12 +56,15 @@ async function buildKernel(cwd, { withMCP = has("mcp") } = {}) {
 
 const HELP = `A — the one harness (Pi × Octomind × jcode × OpenCode × DeepSeek)
 
-  a run "<task>" [--yes] [--mode ask|allow] [--mcp] [--role build|plan]   agent loop (tools+skills+plugins)
+  a run "<task>" [--yes] [--json] [--mcp] [--role build|plan]   agent loop; --json = pi-style JSON event stream
   a compat scan [dir] [--json]         what A found from EVERY harness (skills/MCP/plugins/agents/context)
   a skills [dir]                       list discovered SKILL.md skills (all harnesses)
   a mcp list [dir] | tools <srv> | call <srv> <tool> '<json>'
   a serve [--port 8787]                VPS coordinator: cluster + storage + swarm console + web node UI
-  a join [ws://vps:8787/ws]            this machine becomes a headless swarm node
+  a join [ws://vps:8787/ws] [--runtime a|pi-rs]   headless swarm node (pi-rs = delegate to the Rust pi binary)
+  a runtimes                           detect external agent CLIs (pi/pi-rs, claude, codex, opencode…)
+  a pi-rs [check] | run "<task>"       pi/pi-rs integration status, or run one task on pi
+  a rpc [--yes]                        pi-style RPC mode: NDJSON tasks on stdin, events+results on stdout
   a simnode <phone|chromebook|laptop|desktop|ancient> [--url …]   simulated device (capacity probing demo)
   a capacity                           show device→tier→model table for sample devices
   a policy                             show model-per-capacity policy + catalog
@@ -76,12 +79,17 @@ async function main() {
   if (cmd === "run") {
     const task = positional.join(" "); if (!task) return console.error('usage: a run "<task>"');
     const cwd = cwdOf(); const { kernel, scan, mcpClients } = await buildKernel(cwd);
-    console.log(`⬢ A · ${scan.summary} · tools: ${[...kernel.tools.keys()].join(", ")}`);
-    const p = providerFromEnv(); console.log(`  provider: ${p.id}${p.model ? "/" + p.model : ""} · session log → .a/sessions/`);
+    const jsonMode = has("json"); const say = o => process.stdout.write(JSON.stringify(o) + "\n");
+    if (jsonMode) say({ type: "start", summary: scan.summary, tools: [...kernel.tools.keys()] });
+    else console.log(`⬢ A · ${scan.summary} · tools: ${[...kernel.tools.keys()].join(", ")}`);
+    const p = providerFromEnv(); if (!jsonMode) console.log(`  provider: ${p.id}${p.model ? "/" + p.model : ""} · session log → .a/sessions/`);
     const r = await runAgent({ kernel, provider: p, session: new Session({ cwd }), task,
       systemExtra: contextAppendix(scan), memory: new Memory(cwd), role: flag("role", "build"),
-      onEvent: (ev, c) => { if (ev === "text") console.log("\n" + c.text); if (ev === "tool") console.log(`  ⚙ ${c.name} ${JSON.stringify(c.args).slice(0, 110)} → ${c.result}`); } });
-    console.log(`\n✓ done · tokens in/out: ${r.usage.inputTokens}/${r.usage.outputTokens} · session ${r.sessionId}`);
+      onEvent: jsonMode
+        ? (ev, c) => { if (ev === "text") say({ type: "text", text: c.text }); if (ev === "tool") say({ type: "tool", name: c.name, args: c.args, result: c.result }); }
+        : (ev, c) => { if (ev === "text") console.log("\n" + c.text); if (ev === "tool") console.log(`  ⚙ ${c.name} ${JSON.stringify(c.args).slice(0, 110)} → ${c.result}`); } });
+    if (jsonMode) say({ type: "result", text: r.text, usage: r.usage, sessionId: r.sessionId });
+    else console.log(`\n✓ done · tokens in/out: ${r.usage.inputTokens}/${r.usage.outputTokens} · session ${r.sessionId}`);
     mcpClients.forEach(c => c.stop()); process.exit(0);
   }
   if (cmd === "compat") {
@@ -95,6 +103,7 @@ async function main() {
     show("AGENTS", scan.agents, a => `${a.name} [${a.source}]`);
     show("COMMANDS / PROMPT TEMPLATES", scan.commands, c => `/${c.name} [${c.source}]`);
     show("CONTEXT FILES", scan.context, c => `${c.file} (${c.chars} chars)`);
+    if (scan.pi) console.log(`PI / PI-RS (shared ~/.pi/agent)\n  · ${Object.entries(scan.pi.files).map(([f, ok]) => f + (ok ? "✓" : "—")).join(" ")} · custom providers: ${scan.pi.customProviders.join(", ") || "(none)"} · project settings: ${scan.pi.projectSettings ? "✓" : "—"}\n`);
     if (has("load")) { const { kernel, loaded } = await buildKernel(cwd); console.log("Loaded into kernel:", loaded.join(", ") || "(core only)");
       console.log("Kernel now has tools:", [...kernel.tools.keys()].join(", ")); process.exit(0); }
     return;
@@ -117,6 +126,7 @@ async function main() {
     if (cmd === "simnode") { const name = positional.find(a => SIM_PROFILES[a]) || "laptop";
       joinCluster({ url, token: flag("token", process.env.A_CLUSTER_TOKEN || ""), profile: SIM_PROFILES[name], kind: "sim", name: `sim:${name}` }); }
     else joinCluster({ url, token: flag("token", process.env.A_CLUSTER_TOKEN || ""),
+      runtime: flag("runtime", "a"), piBin: flag("pi-bin"),
       profile: { webgpu: false, webgl: false, deviceMemoryGB: +(process.env.A_NODE_RAM_GB || 8) } }); // CLI node: relay unless native provider set
     return new Promise(() => {});
   }
@@ -150,13 +160,15 @@ async function main() {
     return console.log(`✓ logged in as ${user} → ${base} (token in ~/.a/credentials.json)`);
   }
   if (cmd === "quant") {
-    const { RECIPES, estimateSizeMB, estimateBpw } = await import("../src/quant/recipes.mjs");
-    const { planQuant, QuantJobs, detectTools, INSTALL_HINT } = await import("../src/quant/suite.mjs");
+    const { RECIPES, WEB_RECIPES, estimateSizeMB, estimateWebSizeMB, estimateBpw } = await import("../src/quant/recipes.mjs");
+    const { planQuant, QuantJobs, detectTools, INSTALL_HINT, ONNX_INSTALL_HINT } = await import("../src/quant/suite.mjs");
     const sub = positional[0];
     if (sub === "recipes" || !sub) { const P = +(flag("params", 7));
       console.log(`A-Quant Dynamic recipes (Unsloth Dynamic 2.0 style) — sizes for a ${P}B model:\n`);
       RECIPES.forEach(r => console.log(`  ${r.id.padEnd(16)} tier ${r.tier}  base ${r.base.padEnd(7)} ≈${estimateBpw(r)} bpw  ≈${(estimateSizeMB(P, r) / 1024).toFixed(2)} GB  ${r.label}`));
-      const t = detectTools(); console.log(`\ntoolchain: hf=${t.hf} llama-quantize=${t.quantize} llama-imatrix=${t.imatrix} llama-perplexity=${t.perplexity} (A_LLAMA_CPP=${t.llamaDir})`);
+      console.log(`\nBrowser-node ONNX recipes (Transformers.js / WebGPU \u2014 what tabs actually run):\n`);
+      WEB_RECIPES.forEach(r => console.log(`  ${r.id.padEnd(16)} tier ${r.tier}  dtype ${r.dtype.padEnd(6)} \u2248${r.bpw} bpw  \u2248${(estimateWebSizeMB(P, r) / 1024).toFixed(2)} GB  ${r.label}`));
+      const t = detectTools(); console.log(`\ntoolchain: hf=${t.hf} llama-quantize=${t.quantize} llama-imatrix=${t.imatrix} llama-perplexity=${t.perplexity} optimum-cli=${t.optimum} onnxruntime-py=${t.ortPy} (A_LLAMA_CPP=${t.llamaDir})`);
       return; }
     const { readFile, writeFile, mkdir } = await import("node:fs/promises"); const { join } = await import("node:path");
     const dir = join(process.cwd(), ".a"); await mkdir(dir, { recursive: true });
@@ -164,15 +176,15 @@ async function main() {
       async writeJSON(n, v) { await writeFile(join(dir, n), JSON.stringify(v, null, 2)); }, async event() {} };
     if (sub === "list") { const reg = await lstore.readJSON("quant-registry.json", []);
       reg.forEach(r => console.log(`· ${r.id} · tier ${r.tier} · ${r.downloadMB}MB · ${r.path}`)); return console.log(`${reg.length} variants (VPS registry lives in A_DATA; GUI shows both once served from here)`); }
-    const model = positional[1]; if (!model) return console.error("usage: a quant plan|run <hf-model>");
-    const opts = { model, recipeIds: String(flag("recipes", "A-UD-Q4_K_XL")).split(","), paramsB: flag("params") ? +flag("params") : undefined,
+    const model = positional[1]; if (!model) return console.error("usage: a quant plan|run <hf-model> [--target onnx-web|gguf]");
+    const opts = { model, target: flag("target", "gguf"), recipeIds: flag("recipes") ? String(flag("recipes")).split(",") : undefined, paramsB: flag("params") ? +flag("params") : undefined,
       layers: +(flag("layers", 0)), imatrix: !has("no-imatrix"), dryRun: has("dry-run") };
     if (sub === "plan") { const plan = planQuant(opts);
       if (has("json")) return console.log(JSON.stringify(plan, null, 2));
       console.log(`⬢ A-Quant plan — ${plan.model} (${plan.notes.join(" · ")})\n`);
       plan.stages.forEach((s, i) => console.log(`${i + 1}. [${s.name}] ${s.argv.join(" ")}\n   ${s.why}`));
       console.log("\nVariants:"); plan.variants.forEach(v => console.log(`  · ${v.file.split("/").pop()} → tier ${v.tier} · ≈${v.estSizeMB} MB · ≈${v.bpw} bpw`));
-      const t = detectTools(); if (!t.quantize) console.log("\n" + INSTALL_HINT);
+      const t = detectTools(); if (plan.target === "onnx-web" ? !t.optimum : !t.quantize) console.log("\n" + (plan.target === "onnx-web" ? ONNX_INSTALL_HINT : INSTALL_HINT));
       return; }
     if (sub === "run") { const jobs = await new QuantJobs(lstore).init();
       const job = await jobs.create(opts, "cli");
@@ -181,6 +193,35 @@ async function main() {
       job.results.forEach(r => console.log(`  · ${r.recipe}: ${r.status}${r.sizeMB ? ` (${r.sizeMB} MB${r.ppl ? `, PPL ${r.ppl}` : ""}) → ${r.registryId}` : ""}`));
       process.exit(job.status === "failed" ? 1 : 0); }
     return console.error("usage: a quant recipes|plan|run|list");
+  }
+  if (cmd === "runtimes" || cmd === "pi-rs") {
+    const { detectPi, detectRuntimes, runPiTask, PI_INSTALL_HINT } = await import("../src/cluster/pi-runtime.mjs");
+    if (cmd === "runtimes") { detectRuntimes().forEach(r => console.log(`${r.found ? "✓" : "·"} ${r.bin.padEnd(10)} ${r.label}${r.version ? " — " + r.version : ""}`)); return; }
+    const pi = detectPi(flag("pi-bin"));
+    if (positional[0] === "run") {
+      if (!pi.found) { console.error(PI_INSTALL_HINT); process.exit(1); }
+      const cwd = resolve(flag("cwd", process.cwd()));
+      const r = await runPiTask({ bin: pi.bin, cwd, prompt: positional.slice(1).join(" "), onEvent: (k, t) => console.log(" ", t) });
+      console.log("\n" + r.text); return;
+    }
+    console.log(pi.found ? `✓ pi found: ${pi.path} ${pi.version}\n  ${pi.flavor}\n  swarm node:  a join --runtime pi-rs\n  one-off:     a pi-rs run "<task>"` : PI_INSTALL_HINT);
+    const scan = await scanAll(process.cwd()).catch(() => null);
+    if (scan?.pi) console.log(`  ~/.pi/agent: ${Object.entries(scan.pi.files).map(([f, ok]) => f + (ok ? "✓" : "—")).join(" ")} · custom providers: ${scan.pi.customProviders.join(", ") || "(none)"} · default model: ${scan.pi.defaultModel || "(unset)"}`);
+    return;
+  }
+  if (cmd === "rpc") {
+    const { makeRpcHandler } = await import("../src/core/rpc.mjs");
+    const handle = makeRpcHandler(async ({ task, cwd: tcwd, role, onEvent }) => {
+      const cwd = tcwd ? resolve(tcwd) : process.cwd();
+      const { kernel, scan, mcpClients } = await buildKernel(cwd);
+      try { return await runAgent({ kernel, provider: providerFromEnv(), session: new Session({ cwd }), task,
+        systemExtra: contextAppendix(scan), memory: new Memory(cwd), role,
+        onEvent: (ev, c) => { if (ev === "text") onEvent("text", c.text); if (ev === "tool") onEvent("tool", `${c.name} ${JSON.stringify(c.args).slice(0, 120)} \u2192 ${c.result}`); } }); }
+      finally { mcpClients.forEach(c => c.stop()); }
+    });
+    const reply = o => process.stdout.write(JSON.stringify(o) + "\n");
+    for await (const line of createInterface({ input: process.stdin })) if (line.trim()) await handle(line, reply);
+    return;
   }
   console.error("unknown command:", cmd, "\n\n" + HELP); process.exit(1);
 }

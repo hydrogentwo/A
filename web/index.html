@@ -106,6 +106,28 @@
       <button id="policy-save" class="primary">Save &amp; push policy</button>
     </div>
 
+    <div class="card" id="quant-card">
+      <h3>🦥 Quant Studio <span class="dim small">— Unsloth-Dynamic-style recipes → assign per capacity tier</span></h3>
+      <p class="dim small" id="quant-tools-line">Checking toolchains on the VPS…</p>
+      <div class="grid4">
+        <label>Target — who runs this build?
+          <select id="q-target">
+            <option value="onnx-web">🌐 Browser nodes (ONNX / WebGPU)</option>
+            <option value="gguf">🖥 CLI &amp; VPS nodes (GGUF / llama.cpp)</option>
+          </select></label>
+        <label>HuggingFace model<input id="q-model" placeholder="openbmb/MiniCPM5-2B"></label>
+        <label>Params (B, blank=auto)<input id="q-params" type="number" step="0.1" placeholder="auto"></label>
+        <label><span><input type="checkbox" id="q-imatrix" checked style="width:auto"> imatrix calibration (GGUF)</span><br>
+               <span><input type="checkbox" id="q-dry" checked style="width:auto"> dry-run (plan only, no downloads)</span></label>
+        <label>Recipes<div id="q-recipes" class="small"></div></label>
+      </div>
+      <button id="q-go" class="primary">Queue quant job →</button>
+      <span id="q-msg" class="small dim"></span>
+      <div id="q-jobs" style="margin-top:10px"></div>
+      <h4>Registered variants <span class="dim small">— feed straight into model-per-capacity</span></h4>
+      <div id="q-registry" class="small">None yet — run a job (dry-run shows the full plan; real runs need the toolchain on the VPS).</div>
+    </div>
+
     <h3 class="board-h">Task board</h3>
     <div id="board"></div>
   </section>

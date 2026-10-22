@@ -68,12 +68,29 @@ async function discoverMdAssets(cwd, dirs, kind) {
 export const discoverAgents = cwd => discoverMdAssets(cwd, AGENT_DIRS, "agent");
 export const discoverCommands = cwd => discoverMdAssets(cwd, COMMAND_DIRS, "command");
 
+// Pi agent-dir state, shared byte-for-byte by TypeScript Pi and pi-rs (Rust).
+// We surface presence + custom provider names from models.json — never secrets
+// (auth.json is detected, not read).
+export async function discoverPi(cwd) {
+  const agentDir = join(homedir(), ".pi", "agent");
+  const files = {};
+  for (const f of ["settings.json", "models.json", "auth.json"]) files[f] = await exists(join(agentDir, f));
+  let customProviders = [];
+  try { const m = JSON.parse(await readFile(join(agentDir, "models.json"), "utf8"));
+    customProviders = Object.keys(m.providers || m || {}); } catch {}
+  let defaultModel = null;
+  try { const s = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")); defaultModel = s.defaultModel || s.model || null; } catch {}
+  return { agentDir, files, customProviders, defaultModel,
+    projectSettings: await exists(join(cwd, ".pi", "settings.json")),
+    note: "~/.pi/agent is shared by Pi (TS) and pi-rs (Rust) — sessions/settings/models are format-identical" };
+}
+
 export async function scanAll(cwd, opts) {
   const { discoverMCP } = await import("./mcp.mjs");
   const { discoverPlugins } = await import("./plugins.mjs");
-  const [skills, context, agents, commands, mcp, plugins] = await Promise.all([
-    discoverSkills(cwd, opts), discoverContext(cwd), discoverAgents(cwd), discoverCommands(cwd), discoverMCP(cwd), discoverPlugins(cwd)]);
-  return { cwd, skills, context: context.map(c => ({ file: c.file, chars: c.text.length })), contextParts: context, agents, commands, mcp, plugins,
+  const [skills, context, agents, commands, mcp, plugins, pi] = await Promise.all([
+    discoverSkills(cwd, opts), discoverContext(cwd), discoverAgents(cwd), discoverCommands(cwd), discoverMCP(cwd), discoverPlugins(cwd), discoverPi(cwd)]);
+  return { cwd, skills, context: context.map(c => ({ file: c.file, chars: c.text.length })), contextParts: context, agents, commands, mcp, plugins, pi,
     summary: `${skills.length} skills · ${mcp.length} MCP servers · ${plugins.length} plugins · ${agents.length} agents · ${commands.length} commands · ${context.length} context files` };
 }
 // Build the system-prompt appendix: context files + skill INDEX only (bodies on demand).

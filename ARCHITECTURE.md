@@ -57,7 +57,11 @@ secret paths & catastrophic shells by default and can require approval per rule 
 approvals surface in the CLI or as console actions. Cluster token guards REST+WS.
 Browser nodes can opt out of swarm tasks and keep all files on-device.
 
-## Why not Rust (yet)?
+## Why not Rust (yet)? — and the pi-rs bridge
 jcode/Octomind prove a Rust core is lighter; but Pi/OpenCode/Claude plugins are JS/TS —
-native execution of the existing ecosystem wins for v0.1. The protocol is
-language-agnostic; a Rust node speaking it is the ROADMAP's first stretch goal.
+native execution of the existing ecosystem wins for v0.1. **pi-rs changes the
+math**: it is Pi in one Rust binary, protocol- and format-identical, running TS
+extensions on an embedded Boa engine. So A gets native workers *today* by
+delegation (`a join --runtime pi-rs`, `src/cluster/pi-runtime.mjs`) while the
+wire protocol stays language-agnostic for an eventual `pi-jsrt`-pattern port
+of A's own node. Details: [PI-RS.md](PI-RS.md).

@@ -69,11 +69,19 @@ Train/QLoRA/QAT with Unsloth itself, export (or just save the merged HF dir),
 then point A-Quant at that directory as `model` — the same recipes produce your
 fleet builds. A-Quant deliberately doesn't reimplement training; Unsloth is best at it.
 
+## Browser-node builds (`--target onnx-web`) — the node fleet's own pipeline
+GGUF can't run in a tab, so A-Quant also emits **ONNX** repos in the exact
+layout Transformers.js loads (`onnx/model_q4f16.onnx` etc.): optimum export →
+layout → MatMulNBits quantization via `src/quant/quantize_onnx.py`, with the
+Dynamic protection rules translated (embedding/LM-head excluded from 4-bit,
+block-32, accuracy-level 4 for the WebGPU fp16 path). Finished variants are
+served by the VPS at `/models/<repo>/…` and cached on-device. Concepts +
+the full format/engine map: [WEBGPU-ONNX.md](WEBGPU-ONNX.md).
+
 ## Honest scope notes
-- GGUF serves **CLI/VPS native nodes** (llama.cpp, Ollama). Browser nodes need
-  ONNX (Transformers.js) or MLC (WebLLM) builds — an `onnx` export stage is the
-  next suite milestone (ROADMAP v0.2); until then browsers use upstream builds
-  from the catalog and GGUF variants are marked `CLI/VPS nodes` in the UI.
+- GGUF serves **CLI/VPS native nodes** (llama.cpp, Ollama); ONNX (`A-WEB-*`)
+  serves **browser nodes**. WebLLM/MLC compilation remains a roadmap item —
+  the ONNX path covers the runtime our nodes actually embed today.
 - Unsloth's published UD builds remain the quality bar — A-Quant's edge is
   *your* calibration data and *your* fleet tiers, not a claim to out-quantize its source.
 - Recipes are heuristics from Unsloth's published principles, not copies of

@@ -21,15 +21,15 @@ export const SIM_PROFILES = {
   ancient: { webgpu: false, webgl: false, deviceMemoryGB: 2, storageFreeMB: 1000 },
 };
 
-export function joinCluster({ url, token = "", profile, name, kind = "cli", workRoot = join(process.cwd(), ".a-cluster-work"), provider = providerFromEnv() }) {
+export function joinCluster({ url, token = "", profile, name, kind = "cli", runtime = "a", piBin, workRoot = join(process.cwd(), ".a-cluster-work"), provider = providerFromEnv() }) {
   const capacity = scoreCapacity(profile);
   const id = `${kind}-${Math.random().toString(36).slice(2, 8)}`;
   const ws = new WebSocket(`${url}${url.includes("?") ? "&" : "?"}role=node${token ? `&token=${token}` : ""}`);
   const state = { id, ws, busy: false };
   ws.on("open", () => {
-    ws.send(msg("hello", { node: { id, kind, name: name || `${hostname()} (${kind})`, capacity, profile,
+    ws.send(msg("hello", { node: { id, kind, runtime, name: name || `${hostname()} (${kind}${runtime !== "a" ? "/" + runtime : ""})`, capacity, profile,
       model: null, stats: { tokS: Math.round(5 + (capacity.score || 0) / 2), tasksDone: 0 } } }));
-    state.hb = setInterval(() => ws.readyState === 1 && ws.send(msg("heartbeat", { status: state.busy ? "busy" : "idle", stats: {} })), 10_000);
+    state.hb = setInterval(() => ws.readyState === 1 && ws.send(msg("heartbeat", { status: state.busy ? "busy" : "idle", stats: {} })), 10_000); state.hb.unref?.();
     console.log(`⬢ joined cluster as ${id} · tier ${capacity.tier} (${capacity.reasons.join("; ")})`);
   });
   ws.on("message", async raw => {
@@ -43,6 +43,14 @@ export function joinCluster({ url, token = "", profile, name, kind = "cli", work
     const progress = (ev, ctx) => { const text = ev === "text" ? ctx.text : ev === "tool" ? `⚙ ${ctx.name} ${JSON.stringify(ctx.args).slice(0, 120)} → ${ctx.result}` : null;
       if (text) ws.send(msg("task:progress", { taskId: task.id, text })); };
     try {
+      if (runtime === "pi" || runtime === "pi-rs") {   // delegate to the pi binary (TS Pi or Rust pi-rs — same protocol)
+        const { runPiTask } = await import("./pi-runtime.mjs");
+        const r = await runPiTask({ bin: piBin, cwd, prompt: task.prompt,
+          onEvent: (k, text) => ws.send(msg("task:progress", { taskId: task.id, text })) });
+        ws.send(msg("task:done", { taskId: task.id, result: r.text || "(pi done)",
+          artifact: `# ${task.prompt}\n\n${r.text}\n\n(via ${runtime} runtime)` }));
+        state.busy = false; return;
+      }
       const kernel = new Kernel();
       for (const t of coreTools({ cwd, guardrails: new Guardrails({ mode: "allow" }) })) kernel.registerTool(t);
       const scan = await scanAll(process.cwd(), { global: false }).catch(() => null);

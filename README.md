@@ -16,6 +16,7 @@ Orca-inspired Swarm Console gives the operator maximal control over the fleet.
 | **jcode** | Capability-aware **swarm** (many agents, conflict-isolated workspaces), persistent semantic memory, low footprint |
 | **OpenCode** | Provider freedom (any OpenAI-compatible + Anthropic + local), client/server split, Plan/Build roles, `AGENTS.md` `/init` |
 | **DeepSeek Harness** | Everything-is-a-plugin kernel, append-only event log (model-visible ⇒ logged; resume/fork/replay), sandbox policy, headless operation |
+| **pi-rs** | Rust single-binary Pi: swarm runtime (`a join --runtime pi-rs`), shared `~/.pi/agent` formats, JSON/RPC driver modes now in `a` too — [PI-RS.md](PI-RS.md) |
 | **MiniCPM5-2B-WebGPU-Pi** (HF) | The browser node UX: in-browser agent + bash, "saved on this device", model download card |
 | **Orca** | The over-arching GUI: fleet sidebar, parallel agent panes, fan-out → compare → merge winner, mobile steering |
 

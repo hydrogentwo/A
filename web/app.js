@@ -45,17 +45,33 @@ const toolSchemas = () => TOOLS.map(t => ({ type: "function", function: { name: 
 // ---------- inference: local WebGPU (Transformers.js) or VPS relay ----------
 let localPipe = null, myModel = null, myCapacity = null;
 async function loadLocalModel() {
-  const id = typeof myModel === "string" ? myModel : myModel?.id;
+  const rec = typeof myModel === "object" && myModel ? myModel : modelById(myModel);
+  const id = rec?.id || myModel;
   const st = $("#model-status"), bar = $("#dl-progress");
-  if (!id || id.startsWith("relay/")) { st.textContent = "Tier T0 — using VPS relay model (nothing to download)."; return; }
-  if (!navigator.gpu) { st.textContent = "No WebGPU in this browser — staying on VPS relay."; return; }
-  try {
-    st.textContent = `Loading ${id} via Transformers.js (cached in this browser)…`; bar.classList.remove("hidden");
-    const { pipeline } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6/dist/transformers.min.js");
-    localPipe = await pipeline("text-generation", id, { dtype: "q4", device: "webgpu",
+  if (!id || String(id).startsWith("relay/")) { st.textContent = "Tier T0 \u2014 using VPS relay model (nothing to download)."; return; }
+  // Format gate (see WEBGPU-ONNX.md): browsers execute ONNX via Transformers.js.
+  if (rec?.engine === "gguf") { st.textContent = "Assigned model is a GGUF build \u2014 that\u2019s for CLI/VPS nodes (llama.cpp). Browsers can\u2019t load GGUF here, so this device uses the VPS relay. Assign an ONNX (onnx-web) variant to this tier for on-device inference."; return; }
+  if (rec?.engine === "webllm") { st.textContent = "Assigned model is a WebLLM/MLC build; this page\u2019s local engine is Transformers.js (ONNX) \u2014 using VPS relay for now."; return; }
+  const dtype = rec?.dtype || "q4f16";
+  const repoId = rec?.repo || id;
+  const attempt = async (device, dt) => {
+    const tj = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6/dist/transformers.min.js");
+    if (String(id).startsWith("local/") && tj.env) {   // quantized by A-Quant, served by your VPS
+      tj.env.remoteHost = location.origin + "/models/";
+      tj.env.remotePathTemplate = "{model}/";
+    }
+    return tj.pipeline("text-generation", repoId, { dtype: dt, device,
       progress_callback: p => { if (p.status === "progress") bar.firstElementChild.style.width = `${Math.round(p.progress || 0)}%`; } });
-    bar.classList.add("hidden"); st.textContent = `✓ ${id} running on this GPU.`; $("#inference-mode").textContent = "On your GPU (WebGPU)";
-  } catch (e) { bar.classList.add("hidden"); st.textContent = `Local load failed (${String(e).slice(0, 140)}) — using VPS relay instead. (Some catalog models ship via WebLLM; relay covers them today.)`; }
+  };
+  try {
+    st.textContent = `Loading ${repoId} (${dtype}) via Transformers.js \u2014 cached in this browser after first download\u2026`; bar.classList.remove("hidden");
+    if (navigator.gpu) {
+      try { localPipe = await attempt("webgpu", dtype); $("#inference-mode").textContent = `On your GPU (WebGPU \u00b7 ONNX ${dtype})`; }
+      catch (gpuErr) { st.textContent = `WebGPU load failed (${String(gpuErr).slice(0, 100)}) \u2014 retrying on WASM/CPU (q8)\u2026`;
+        localPipe = await attempt("wasm", "q8"); $("#inference-mode").textContent = "On your CPU (WASM \u00b7 ONNX q8)"; }
+    } else { localPipe = await attempt("wasm", "q8"); $("#inference-mode").textContent = "On your CPU (WASM \u00b7 ONNX q8)"; }
+    bar.classList.add("hidden"); st.textContent = `\u2713 ${repoId} running on this device.`;
+  } catch (e) { bar.classList.add("hidden"); st.textContent = `Local load failed (${String(e).slice(0, 140)}) \u2014 using VPS relay instead.`; }
 }
 async function chatOnce(messages) {
   if (localPipe) { // small local models: prompt-level tool protocol
@@ -148,6 +164,7 @@ function bootUI() {
 }
 function renderSwarm() {
   if (!SNAP) return; const { nodes, tasks, policy } = SNAP;
+  renderQuant();
   const online = nodes.filter(n => n.status !== "offline");
   $("#fleet-count").textContent = `· ${online.length} online`;
   const fleetVram = online.reduce((a, n) => a + (n.capacity?.estVramMB || 0), 0);
@@ -193,6 +210,93 @@ function renderSwarm() {
     b.textContent = "🏆 merged to VPS artifacts ✓"; });
 }
 const control = b => api("/api/control", { method: "POST", body: JSON.stringify(b) });
+
+// ---------- wiring ----------
+// ---------- commander auth (gates the Swarm Console only) ----------
+let ME = null, uiStarted = false;
+async function refreshMe() {
+  try { ME = await (await fetch("/api/auth/me")).json(); }
+  catch { ME = { authEnabled: false, user: { username: "(offline)", role: "?" } }; }
+  const authed = !ME.authEnabled || !!ME.user;
+  $("#auth-gate").classList.toggle("hidden", authed);
+  $("#fleet").classList.toggle("hidden", !authed);
+  $("#swarm-main").classList.toggle("hidden", !authed);
+  const chip = $("#user-chip");
+  if (ME.user) { chip.textContent = `👤 ${ME.user.username} · ${ME.user.role}`; chip.classList.remove("hidden"); $("#logout-btn").classList.remove("hidden"); }
+  else { chip.classList.add("hidden"); $("#logout-btn").classList.add("hidden"); }
+  if (!authed) {
+    const setup = !!ME.needsSetup;
+    $("#auth-title").textContent = setup ? "⬢ Create the first commander" : "⬢ Commander login";
+    $("#auth-blurb").textContent = setup
+      ? "No accounts exist yet on this VPS. Create the first commander (admin) — setup closes permanently afterwards. On a public VPS, prefer bootstrapping with A_ADMIN_USER/A_ADMIN_PASSWORD instead."
+      : "The Swarm Console commands the whole fleet — login required. Worker devices joining as nodes don't need an account.";
+    $("#auth-go").textContent = setup ? "Create commander account" : "Log in";
+    $("#auth-token-row").classList.toggle("hidden", !setup);
+  }
+  if (authed && !uiStarted) { uiStarted = true; bootUI(); }
+  if (authed && ME.user?.role === "admin") loadUsers();
+}
+$("#auth-form").onsubmit = async e => { e.preventDefault(); $("#auth-err").textContent = "";
+  const setup = !!ME?.needsSetup;
+  const r = await api(setup ? "/api/auth/setup" : "/api/auth/login", { method: "POST",
+    body: JSON.stringify({ username: $("#auth-user").value.trim(), password: $("#auth-pass").value, setupToken: $("#auth-token").value || undefined }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("#auth-err").textContent = j.error || `HTTP ${r.status}`; return; }
+  $("#auth-pass").value = ""; refreshMe(); };
+$("#logout-btn").onclick = async () => { await api("/api/auth/logout", { method: "POST" }); location.reload(); };
+async function loadUsers() {
+  const r = await api("/api/auth/users"); if (!r.ok) return; const { users } = await r.json();
+  $("#users-card").classList.remove("hidden");
+  $("#user-list").innerHTML = users.map(u => `<div>👤 <strong>${u.username}</strong> <span class="badge">${u.role}</span>${u.username !== ME.user.username ? `<button data-del-user="${u.username}" style="float:right">✕</button>` : ""}</div>`).join("");
+  document.querySelectorAll("[data-del-user]").forEach(b => b.onclick = async () => {
+    await api("/api/auth/users", { method: "POST", body: JSON.stringify({ action: "delete", username: b.dataset.delUser }) }); loadUsers(); });
+}
+$("#nu-go").onclick = async () => {
+  const r = await api("/api/auth/users", { method: "POST", body: JSON.stringify({ username: $("#nu-name").value.trim(), password: $("#nu-pass").value, role: $("#nu-role").value }) });
+  if (!r.ok) { alert((await r.json().catch(() => ({}))).error || "failed"); return; }
+  $("#nu-name").value = $("#nu-pass").value = ""; loadUsers(); };
+
+// ---------- Quant Studio ----------
+function renderQuant() {
+  const q = SNAP?.quant; if (!q) return;
+  const target = $("#q-target")?.value || "onnx-web";
+  const t = q.tools || {};
+  const webOk = t.optimum && t.ortPy, ggufOk = t.quantize;
+  $("#quant-tools-line").textContent = target === "onnx-web"
+    ? (webOk ? "✓ ONNX toolchain present (optimum + onnxruntime) — real browser builds enabled."
+             : "⚠ ONNX toolchain missing on VPS (optimum-cli / onnxruntime) — jobs run as full dry-run plans until installed (QUANT.md).")
+    : (ggufOk ? "✓ llama.cpp toolchain present — real GGUF builds enabled."
+              : "⚠ llama.cpp toolchain not on the VPS yet — dry-run plans until installed (QUANT.md).");
+  const list = (target === "onnx-web" ? q.recipes.web : q.recipes.gguf) || [];
+  if ($("#q-recipes").dataset.built !== target) { $("#q-recipes").dataset.built = target;
+    const defaults = target === "onnx-web" ? ["A-WEB-Q4F16-XL", "A-WEB-Q4"] : ["A-UD-Q4_K_XL", "A-UD-Q2_K_XL"];
+    $("#q-recipes").innerHTML = list.map(r => `<label style="display:block"><input type="checkbox" value="${r.id}" style="width:auto" ${defaults.includes(r.id) ? "checked" : ""}> ${r.id} <span class="dim">→ ${r.tier}${r.dtype ? " · " + r.dtype : ""}</span></label>`).join(""); }
+  $("#q-jobs").innerHTML = (q.jobs || []).slice(0, 6).map(j => `
+    <details class="task" style="margin-bottom:8px"><summary><strong>${j.id}</strong> · ${j.model} · <span class="st-${j.status === "done" || j.status === "planned" ? "done" : j.status === "failed" ? "failed" : "assigned"}">● ${j.status}${j.stage ? " · " + j.stage : ""}</span> <span class="dim">${j.target || "gguf"}${j.dryRun ? " · dry-run" : ""} · by ${j.createdBy}</span></summary>
+      <div class="term">${(j.logTail || j.log || []).slice(-25).join("\n") || j.error || ""}</div>
+      ${(j.results || []).map(r => `<div class="small">· ${r.recipe}: ${r.status}${r.sizeMB ? ` · ${r.sizeMB} MB` : ""}${r.ppl ? ` · PPL ${r.ppl}` : ""}${r.registryId ? ` · <code>${r.registryId}</code>` : ""}</div>`).join("")}
+    </details>`).join("");
+  const reg = q.registry || [];
+  if (reg.length) $("#q-registry").innerHTML = `<table style="width:100%;border-collapse:collapse"><tr><th align=left>Variant</th><th align=left>Size</th><th align=left>Runs on</th><th align=left>Assign to tier</th></tr>` +
+    reg.map((v, i) => `<tr><td><code>${v.id}</code><br><span class="dim">${v.baseModel || ""} · ${v.bpw || "?"} bpw</span></td>
+      <td>${v.downloadMB || "?"} MB</td><td>${v.engine === "onnx-web" ? "🌐 browser (ONNX " + (v.dtype || "") + ")" : "🖥 CLI/VPS (GGUF)"}</td>
+      <td><span class="row2"><select id="qr-tier-${i}">${TIERS.map(tt => `<option ${tt === v.tier ? "selected" : ""}>${tt}</option>`).join("")}</select>
+      <button data-qr="${i}">Assign</button></span></td></tr>`).join("") + "</table>";
+  document.querySelectorAll("[data-qr]").forEach(b => b.onclick = async () => {
+    const v = reg[+b.dataset.qr]; const tier = $(`#qr-tier-${b.dataset.qr}`).value;
+    await api("/api/policy", { method: "POST", body: JSON.stringify({ tiers: { ...SNAP.policy.tiers, [tier]: v.id } }) });
+    b.textContent = `✓ ${tier} now uses it`; });
+}
+$("#q-target").onchange = () => { $("#q-recipes").dataset.built = ""; renderQuant(); };
+$("#q-go").onclick = async () => {
+  const model = $("#q-model").value.trim(); if (!model) { $("#q-msg").textContent = "enter a HuggingFace model id"; return; }
+  const recipeIds = [...document.querySelectorAll("#q-recipes input:checked")].map(c => c.value);
+  if (!recipeIds.length) { $("#q-msg").textContent = "pick at least one recipe"; return; }
+  const r = await api("/api/quant/jobs", { method: "POST", body: JSON.stringify({ model, recipeIds, target: $("#q-target").value,
+    paramsB: $("#q-params").value ? +$("#q-params").value : undefined, imatrix: $("#q-imatrix").checked, dryRun: $("#q-dry").checked }) });
+  const j = await r.json().catch(() => ({}));
+  $("#q-msg").textContent = r.ok ? `job ${j.jobId} queued — watch it below` : (j.error || `HTTP ${r.status} (login as operator?)`);
+  if (r.status === 401) refreshMe(); };
 
 // ---------- wiring ----------
 $("#tab-node").onclick = () => switchView(false); $("#tab-swarm").onclick = () => switchView(true);

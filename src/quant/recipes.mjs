@@ -99,3 +99,29 @@ export function ggufFileName(modelId, recipe) {
   const base = String(modelId).split("/").pop().replace(/[^\w.\-]/g, "-");
   return `${base}-${recipe.id}.gguf`;
 }
+
+// ─── Browser-node builds: ONNX for Transformers.js / ONNX Runtime Web ────────
+// The Unsloth-Dynamic idea translated: protect embedding + LM head (fp16/fp32,
+// excluded from 4-bit), MatMulNBits block-size 32, accuracy_level 4 (fp16
+// accumulation — the WebGPU fast path). dtype = the Transformers.js selector;
+// file = onnx/model_<dtype>.onnx (q8 → model_quantized.onnx by convention).
+export const WEB_RECIPES = [
+  { id: "A-WEB-Q4F16-XL", label: "ONNX Dynamic q4f16 XL (flagship WebGPU — embed/head protected)",
+    dtype: "q4f16", bits: 4, blockSize: 32, symmetric: true, accuracyLevel: 4, protectEmbed: true,
+    tier: "T2", bpw: 4.9, engine: "onnx-web", roles: ["build", "chat", "explore"] },
+  { id: "A-WEB-Q4", label: "ONNX q4 smallest (embedding also 4-bit — phones)",
+    dtype: "q4", bits: 4, blockSize: 32, symmetric: true, accuracyLevel: 0, protectEmbed: false,
+    tier: "T1", bpw: 4.35, engine: "onnx-web", roles: ["chat", "explore"] },
+  { id: "A-WEB-Q8", label: "ONNX dynamic INT8 (WASM/no-WebGPU friendly)",
+    dtype: "q8", bits: 8, blockSize: 0, symmetric: false, accuracyLevel: 0, protectEmbed: true,
+    tier: "T3", bpw: 8.4, engine: "onnx-web", roles: ["build", "review", "chat"] },
+  { id: "A-WEB-FP16", label: "ONNX fp16 (big-GPU quality reference)",
+    dtype: "fp16", bits: 16, blockSize: 0, symmetric: false, accuracyLevel: 0, protectEmbed: true,
+    tier: "T4", bpw: 16, engine: "onnx-web", roles: ["plan", "build", "review"] },
+];
+export const webRecipeById = id => WEB_RECIPES.find(r => r.id === id) || null;
+export const onnxFileName = recipe => recipe.dtype === "q8" ? "model_quantized.onnx" : recipe.dtype === "fp16" ? "model_fp16.onnx" : `model_${recipe.dtype}.onnx`;
+export function estimateWebSizeMB(paramsB, recipe) {
+  if (!paramsB) return null;
+  return Math.round(paramsB * 1e9 * recipe.bpw / 8 / 1048576 * 1.03); // + scales/graph overhead
+}

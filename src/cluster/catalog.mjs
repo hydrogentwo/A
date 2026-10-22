@@ -61,3 +61,10 @@ export function resolveModelForNode(node, policy = DEFAULT_POLICY) {
   const id = policy.tiers?.[tier] || DEFAULT_POLICY.tiers[tier] || "relay/default";
   return modelById(id) || id;
 }
+
+// Which artifact format a node kind can actually execute (see WEBGPU-ONNX.md).
+export function formatForNode({ kind = "browser", webgpu = true } = {}) {
+  if (kind === "cli" || kind === "vps") return { format: "gguf", engine: "llama.cpp / Ollama / API providers", dtype: null };
+  if (webgpu) return { format: "onnx", engine: "Transformers.js (ONNX Runtime WebGPU)", dtype: "q4f16" };
+  return { format: "onnx", engine: "Transformers.js (ONNX Runtime WASM)", dtype: "q8", fallback: "vps-relay" };
+}

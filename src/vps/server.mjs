@@ -14,7 +14,9 @@ import { msg, parse, newTaskId } from "../cluster/protocol.mjs";
 import { providerFromEnv } from "../core/providers.mjs";
 import { Auth, roleRank, sessionTokenFromRequest, sessionCookie, clearCookie } from "./auth.mjs";
 import { QuantJobs, detectTools } from "../quant/suite.mjs";
-import { RECIPES } from "../quant/recipes.mjs";
+import { RECIPES, WEB_RECIPES } from "../quant/recipes.mjs";
+import { createReadStream } from "node:fs";
+import { stat as fsStat } from "node:fs/promises";
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "web");
 const SRC = join(dirname(fileURLToPath(import.meta.url)), ".."); // serve isomorphic modules to browser
@@ -36,7 +38,7 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
   const snapshot = () => ({ nodes: [...nodes.values()].map(pub), tasks: [...tasks.values()].slice(-100),
     policy: store.policy, catalog: [...CATALOG, ...registryCache], tiers: TIER_INFO, strategy: scheduler.strategy,
     maxConcurrentPerNode: scheduler.maxConcurrentPerNode, relay: relay.id,
-    authEnabled: auth.enabled, quant: { recipes: RECIPES, jobs: quant.list(), registry: registryCache, tools: quantTools } });
+    authEnabled: auth.enabled, quant: { recipes: { gguf: RECIPES, web: WEB_RECIPES }, jobs: quant.list(), registry: registryCache, tools: quantTools } });
   const toUIs = (type, data) => { const s = msg(type, data); for (const ws of uis) try { ws.send(s); } catch {} };
   const broadcastState = () => toUIs("snapshot", snapshot());
   const quant = await new QuantJobs(store, { onChange: async () => { registryCache = await quant.registry().catch(() => registryCache); broadcastState(); } }).init();
@@ -110,13 +112,28 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
         } catch (e) { return send(400, { error: e.message }); } }
       // ---- quant suite endpoints (commander) ----
       if (P === "/api/quant/jobs") {
-        if (!isPost) return send(200, { jobs: quant.list(), recipes: RECIPES, tools: quantTools });
+        if (!isPost) return send(200, { jobs: quant.list(), recipes: { gguf: RECIPES, web: WEB_RECIPES }, tools: quantTools });
         const b = await body();
         try { const job = await quant.create({ model: b.model, recipeIds: b.recipeIds, paramsB: b.paramsB, layers: b.layers,
-          imatrix: b.imatrix !== false, calibration: b.calibration, dryRun: !!b.dryRun, outDir: b.outDir }, req._id?.username || "operator");
+          imatrix: b.imatrix !== false, calibration: b.calibration, dryRun: !!b.dryRun, target: b.target || "gguf", outDir: b.outDir || join(store.dir, "quant-out") }, req._id?.username || "operator");
           return send(200, { jobId: job.id, status: job.status }); }
         catch (e) { return send(400, { error: e.message }); } }
       if (P === "/api/quant/registry") return send(200, { registry: registryCache });
+      // Locally-quantized ONNX repos, served for browser-node loading
+      // (Transformers.js fetches {origin}/models/<repo>/onnx/model_<dtype>.onnx).
+      // Model weights are public artifacts; only registered dirs are exposed.
+      if (P.startsWith("/models/")) {
+        const entry = registryCache.find(r => r.engine === "onnx-web" && P.startsWith(`/models/${r.repo || r.id}/`));
+        if (!entry) return send(404, { error: "unknown local model" });
+        const rel = decodeURIComponent(P.slice(`/models/${entry.repo || entry.id}/`.length));
+        const file = join(entry.path, rel);
+        if (!file.startsWith(entry.path)) return send(403, { error: "forbidden" });
+        const st = await fsStat(file).catch(() => null);
+        if (!st?.isFile()) return send(404, { error: "not found" });
+        res.writeHead(200, { "content-type": file.endsWith(".json") ? "application/json" : "application/octet-stream",
+          "content-length": st.size, "cache-control": "public, max-age=31536000, immutable" });
+        createReadStream(file).pipe(res); return;
+      }
       if (url.pathname === "/api/state") return send(200, { ...snapshot(), store: await store.stats(), events: await store.events(50) });
       if (url.pathname === "/api/tasks" && req.method === "POST") {
         const b = await body(); const now = Date.now(); const created = [];
@@ -190,7 +207,7 @@ export async function startServer({ port = 8787, host = "0.0.0.0", token = proce
     });
     ws.on("close", async () => { if (!node) return; node.status = "offline"; await store.event("node:leave", { nodeId: node.id });
       for (const t of tasks.values()) if (t.nodeId === node.id && ["assigned"].includes(t.status)) { t.status = "queued"; t.nodeId = null; }
-      node.assigned = 0; setTimeout(() => { if (nodes.get(node.id)?.status === "offline") nodes.delete(node.id); broadcastState(); }, 60_000); tryDispatch(); });
+      node.assigned = 0; setTimeout(() => { if (nodes.get(node.id)?.status === "offline") nodes.delete(node.id); broadcastState(); }, 60_000).unref?.(); tryDispatch(); });
   });
   const hbTimer = setInterval(() => { const now = Date.now(); for (const n of nodes.values()) if (n.status !== "offline" && now - (n.lastSeen || 0) > 45_000) n.status = "offline"; broadcastState(); }, 15_000);
   hbTimer.unref?.();
