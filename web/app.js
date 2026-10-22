@@ -5,6 +5,7 @@
 //  · "Swarm console" = Orca-style fleet command: every open browser/CLI is a node;
 //    fan out tasks, compare broadcast results, control everything live.
 import { probeBrowser } from "/src/cluster/capacity.mjs";
+import { runWasmAgent, toolCallsToText } from "/wasm-host.js";
 import { TIERS, TIER_INFO, CATALOG, modelById } from "/src/cluster/catalog.mjs";
 
 const $ = s => document.querySelector(s);
@@ -90,7 +91,30 @@ async function chatOnce(messages) {
 
 // ---------- browser agent loop ----------
 let history = [{ role: "system", content: "You are A, a coding agent. Use tools to act; read before assuming. Be brief." }];
+// WASM agent core (WASM-STACK.md): the loop runs INSIDE WebAssembly; this page
+// is its operating system (inference + tools + VFS). pi-rs will occupy this
+// exact slot when upstream ships a pi_agent.wasm — same host ABI.
+let wasmBytesCache = null;
+async function wasmChatText(prompt) {
+  if (localPipe) { const out = await localPipe(prompt, { max_new_tokens: 512 }); return (out?.[0]?.generated_text || "").slice(prompt.length).trim(); }
+  const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ messages: [{ role: "user", content: prompt }], tools: toolSchemas() }) });
+  if (!r.ok) throw new Error(`relay ${r.status}`);
+  return toolCallsToText(await r.json());
+}
+function selectedCore() { return $("#agent-core")?.value || localStorage.getItem("a-agent-core") || "js"; }
+async function runWasmCore(task, onProgress) {
+  if (!wasmBytesCache) { const r = await fetch("/agents/a-agent.wasm"); if (!r.ok) throw new Error("wasm core fetch " + r.status); wasmBytesCache = await r.arrayBuffer(); }
+  const r = await runWasmAgent(wasmBytesCache, task, { tools: TOOLS, chatText: wasmChatText,
+    onEvent: (k, t) => onProgress(k === "log" ? "tool" : k, k === "log" ? "🧩 " + t : t) });
+  return r.text || "(done)";
+}
+
 async function runBrowserAgent(task, { onProgress = () => {}, fresh = false } = {}) {
+  const core = selectedCore();
+  if (core === "wasm" || core === "pi-rs-wasm") {
+    if (core === "pi-rs-wasm") onProgress("text", "🦀 pi-rs has no official WASM build yet — running the reference WASM core in the pi-rs slot (the same host ABI a future pi_agent.wasm will use). See WASM-STACK.md.");
+    return runWasmCore(task, onProgress);
+  }
   const msgs = fresh ? [history[0], { role: "user", content: task }] : (history.push({ role: "user", content: task }), history);
   let final = "";
   for (let step = 0; step < 10; step++) {
@@ -125,7 +149,7 @@ Benchmark  ${profile.benchScore !== undefined ? Math.round(profile.benchScore * 
   $("#inference-mode").textContent = capacity.tier === "T0" ? "VPS relay" : "Your GPU (after load) / relay until then";
 
   nodeWS = new WebSocket(wsURL("node"));
-  nodeWS.onopen = () => { nodeWS.send(JSON.stringify({ type: "hello", node: { id: nodeId, kind: "browser", name: nodeName, capacity, profile, stats: { tokS: 0, tasksDone: 0 } } }));
+  nodeWS.onopen = () => { nodeWS.send(JSON.stringify({ type: "hello", node: { id: nodeId, kind: "browser", agentCore: localStorage.getItem("a-agent-core") || "js", name: nodeName, capacity, profile, stats: { tokS: 0, tasksDone: 0 } } }));
     setInterval(() => nodeWS.readyState === 1 && nodeWS.send(JSON.stringify({ type: "heartbeat", status: busy ? "busy" : "idle", stats: {} })), 10_000); };
   nodeWS.onmessage = async ev => { let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === "welcome" || m.type === "policy:update" || m.type === "model:set") applyModel(m.model);
@@ -299,6 +323,12 @@ $("#q-go").onclick = async () => {
   if (r.status === 401) refreshMe(); };
 
 // ---------- wiring ----------
+const coreSel = $("#agent-core");
+if (coreSel) { coreSel.value = localStorage.getItem("a-agent-core") || "js";
+  const showCore = () => { $("#core-status").textContent = coreSel.value === "js" ? "agent loop runs in JS"
+    : coreSel.value === "wasm" ? "🧩 agent loop runs inside WebAssembly — this page is its OS"
+    : "🦀 pi-rs slot (reference core until pi_agent.wasm exists)"; };
+  coreSel.onchange = () => { localStorage.setItem("a-agent-core", coreSel.value); showCore(); }; showCore(); }
 $("#tab-node").onclick = () => switchView(false); $("#tab-swarm").onclick = () => switchView(true);
 function switchView(swarm) { $("#view-node").classList.toggle("hidden", swarm); $("#view-swarm").classList.toggle("hidden", !swarm);
   $("#tab-node").classList.toggle("active", !swarm); $("#tab-swarm").classList.toggle("active", swarm); history.replaceState(null, "", swarm ? "/swarm" : "/"); }

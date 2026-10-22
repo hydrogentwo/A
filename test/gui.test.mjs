@@ -17,4 +17,7 @@ test("gui: swarm console JS is complete and wired to the HTML", async () => {
     assert.ok(html.includes(`id="${id}"`), `#${id} in HTML`);
   for (const id of ["auth-form", "q-target", "q-go", "logout-btn"])
     assert.ok(js.includes(`"#${id}"`), `#${id} handled in JS`);
+  assert.ok(html.includes('id="agent-core"'), "#agent-core select in HTML");
+  assert.ok(js.includes("runWasmAgent") && js.includes('import { runWasmAgent'), "WASM core wired in JS");
+  assert.ok(js.includes("/agents/a-agent.wasm"), "wasm module URL present");
 });

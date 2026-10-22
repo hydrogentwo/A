@@ -13,9 +13,15 @@ export function demoProvider() {
     const toolResults = messages.filter(m => m.role === "tool").length;
     const has = n => tools.some(t => t.function?.name === n);
     const txt = String(lastUser);
+    // Text-protocol agents (e.g. the WASM core) pack history into one prompt:
+    // a "tool result:" line means the requested action already happened.
+    if (toolResults === 0 && txt.includes("tool result:")) {
+      const seg = txt.split("tool result:").pop().split("\n")[0].trim();
+      return { text: `Done. Tool result: ${seg.slice(0, 200)}`, toolCalls: [], usage: usage(messages, seg) };
+    }
     if (toolResults === 0) {
       let m;
-      if (has("write") && (m = txt.match(/create\s+(\S+)\s+(?:saying|with(?: content)?)[:\s]+(.+)/is)))
+      if (has("write") && (m = txt.match(/create\s+(\S+)\s+(?:saying|with(?: content)?)[:\s]+([^\n]+)/is)))
         return { text: "", toolCalls: [{ name: "write", args: { path: m[1], content: m[2].trim() } }], usage: usage(messages, txt) };
       if (has("bash") && (m = txt.match(/run[:\s]+(.+)/is)))
         return { text: "", toolCalls: [{ name: "bash", args: { command: m[1].trim() } }], usage: usage(messages, txt) };

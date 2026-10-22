@@ -93,7 +93,9 @@ model (or your Unsloth fine-tune) into per-tier Dynamic GGUFs — BF16 convert �
 imatrix calibration on chat/code data → per-tensor dynamic quantization
 (protect embeddings/down-proj/router, crush bulk experts) → perplexity
 validation → auto-registered into the catalog, ready to assign per capacity
-tier. Full detail + credits: [QUANT.md](QUANT.md).
+tier. Full detail + credits: [QUANT.md](QUANT.md). Botswarm nodes can even run the
+agent loop itself inside WebAssembly (reference core today, pi-rs slot ready):
+[WASM-STACK.md](WASM-STACK.md).
 
 ## Security model
 Cluster token on every API/WS · guardrails-as-code (`allow|ask|deny`, secret paths denied

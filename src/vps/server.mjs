@@ -20,7 +20,7 @@ import { stat as fsStat } from "node:fs/promises";
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "web");
 const SRC = join(dirname(fileURLToPath(import.meta.url)), ".."); // serve isomorphic modules to browser
-const MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml" };
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".wasm": "application/wasm" };
 
 export async function startServer({ port = 8787, host = "0.0.0.0", token = process.env.A_CLUSTER_TOKEN || "", dataDir } = {}) {
   const store = await new Store(dataDir).init();

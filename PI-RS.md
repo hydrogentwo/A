@@ -43,6 +43,14 @@ printf '{"type":"task","id":1,"prompt":"build it"}\n' | a rpc --yes
 — never reading secrets (`auth.json` is detected, not opened). Switching a
 machine between Pi, pi-rs and A is lossless because all three read the same dirs.
 
+## 4b. pi-rs in the browser: the WASM stack
+For browser nodes the natural home of pi-rs is **wasm32 inside the tab**,
+in the MiniCPM-Pi-style stack (agent core + Transformers.js/WebGPU + browser
+shell/FS). Upstream has no wasm build yet, so A ships the *slot* plus a
+working 2.9 KB reference WASM core on the same host ABI today — node UI →
+Agent core → "pi-rs WASM". The crate-by-crate port plan and ABI spec live in
+[WASM-STACK.md](WASM-STACK.md).
+
 ## 4. The native-node roadmap got a blueprint
 pi-rs's `pi-jsrt` (Boa + oxc + Node shims) proves the hard part of a Rust A
 node: running the existing JS/TS plugin ecosystem without Node. Our roadmap

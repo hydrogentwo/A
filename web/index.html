@@ -40,6 +40,13 @@
       <div class="row">
         <button id="load-model" class="primary">Load model on this device</button>
         <label class="small"><input type="checkbox" id="accept-tasks" checked> Accept swarm tasks</label>
+        <label class="small">Agent core
+          <select id="agent-core">
+            <option value="js">JS core (built-in)</option>
+            <option value="wasm">🧩 WASM core (A reference, 2.9 KB)</option>
+            <option value="pi-rs-wasm">🦀 pi-rs WASM (drop-in slot)</option>
+          </select></label>
+        <span id="core-status" class="dim small"></span>
         <span id="model-status" class="dim small"></span>
       </div>
       <div id="dl-progress" class="bar hidden"><i></i></div>
