@@ -1,0 +1,8 @@
+node_modules/
+.a-data/
+.a-cluster-work/
+.a/sessions/
+.a/memory.jsonl
+*.log
+.a/quant-*.json
+quant-out/

@@ -1,0 +1,60 @@
+def quicksort(xs):
+    if len(xs) < 2: return xs
+    pivot = xs[len(xs)//2]
+    return quicksort([x for x in xs if x < pivot]) + [pivot] + quicksort([x for x in xs if x > pivot])
+User: My tests fail with a race condition in the worker pool. How do I debug it?
+Assistant: start by making the failure deterministic: add stress repetitions, log the lock ordering, and check whether a shared cache is mutated without synchronization. Then bisect which await point allows the interleaving.
+<tool_call>{"name":"read","args":{"path":"src/vps/server.mjs"}}</tool_call>
+<tool_result>export async function startServer({ port = 8787 } = {}) { ... }</tool_result>
+The scheduler prefers the smallest sufficient node for a build task, keeping larger GPUs free for planning.
+Quantization trades a small amount of numerical precision for large reductions in memory. Sensitivity differs per tensor: embeddings and down-projections degrade fastest, so dynamic recipes protect them while compressing tolerant bulk weights harder.
+def quicksort(xs):
+    if len(xs) < 2: return xs
+    pivot = xs[len(xs)//2]
+    return quicksort([x for x in xs if x < pivot]) + [pivot] + quicksort([x for x in xs if x > pivot])
+User: My tests fail with a race condition in the worker pool. How do I debug it?
+Assistant: start by making the failure deterministic: add stress repetitions, log the lock ordering, and check whether a shared cache is mutated without synchronization. Then bisect which await point allows the interleaving.
+<tool_call>{"name":"read","args":{"path":"src/vps/server.mjs"}}</tool_call>
+<tool_result>export async function startServer({ port = 8787 } = {}) { ... }</tool_result>
+The scheduler prefers the smallest sufficient node for a build task, keeping larger GPUs free for planning.
+Quantization trades a small amount of numerical precision for large reductions in memory. Sensitivity differs per tensor: embeddings and down-projections degrade fastest, so dynamic recipes protect them while compressing tolerant bulk weights harder.
+def quicksort(xs):
+    if len(xs) < 2: return xs
+    pivot = xs[len(xs)//2]
+    return quicksort([x for x in xs if x < pivot]) + [pivot] + quicksort([x for x in xs if x > pivot])
+User: My tests fail with a race condition in the worker pool. How do I debug it?
+Assistant: start by making the failure deterministic: add stress repetitions, log the lock ordering, and check whether a shared cache is mutated without synchronization. Then bisect which await point allows the interleaving.
+<tool_call>{"name":"read","args":{"path":"src/vps/server.mjs"}}</tool_call>
+<tool_result>export async function startServer({ port = 8787 } = {}) { ... }</tool_result>
+The scheduler prefers the smallest sufficient node for a build task, keeping larger GPUs free for planning.
+Quantization trades a small amount of numerical precision for large reductions in memory. Sensitivity differs per tensor: embeddings and down-projections degrade fastest, so dynamic recipes protect them while compressing tolerant bulk weights harder.
+def quicksort(xs):
+    if len(xs) < 2: return xs
+    pivot = xs[len(xs)//2]
+    return quicksort([x for x in xs if x < pivot]) + [pivot] + quicksort([x for x in xs if x > pivot])
+User: My tests fail with a race condition in the worker pool. How do I debug it?
+Assistant: start by making the failure deterministic: add stress repetitions, log the lock ordering, and check whether a shared cache is mutated without synchronization. Then bisect which await point allows the interleaving.
+<tool_call>{"name":"read","args":{"path":"src/vps/server.mjs"}}</tool_call>
+<tool_result>export async function startServer({ port = 8787 } = {}) { ... }</tool_result>
+The scheduler prefers the smallest sufficient node for a build task, keeping larger GPUs free for planning.
+Quantization trades a small amount of numerical precision for large reductions in memory. Sensitivity differs per tensor: embeddings and down-projections degrade fastest, so dynamic recipes protect them while compressing tolerant bulk weights harder.
+def quicksort(xs):
+    if len(xs) < 2: return xs
+    pivot = xs[len(xs)//2]
+    return quicksort([x for x in xs if x < pivot]) + [pivot] + quicksort([x for x in xs if x > pivot])
+User: My tests fail with a race condition in the worker pool. How do I debug it?
+Assistant: start by making the failure deterministic: add stress repetitions, log the lock ordering, and check whether a shared cache is mutated without synchronization. Then bisect which await point allows the interleaving.
+<tool_call>{"name":"read","args":{"path":"src/vps/server.mjs"}}</tool_call>
+<tool_result>export async function startServer({ port = 8787 } = {}) { ... }</tool_result>
+The scheduler prefers the smallest sufficient node for a build task, keeping larger GPUs free for planning.
+Quantization trades a small amount of numerical precision for large reductions in memory. Sensitivity differs per tensor: embeddings and down-projections degrade fastest, so dynamic recipes protect them while compressing tolerant bulk weights harder.
+def quicksort(xs):
+    if len(xs) < 2: return xs
+    pivot = xs[len(xs)//2]
+    return quicksort([x for x in xs if x < pivot]) + [pivot] + quicksort([x for x in xs if x > pivot])
+User: My tests fail with a race condition in the worker pool. How do I debug it?
+Assistant: start by making the failure deterministic: add stress repetitions, log the lock ordering, and check whether a shared cache is mutated without synchronization. Then bisect which await point allows the interleaving.
+<tool_call>{"name":"read","args":{"path":"src/vps/server.mjs"}}</tool_call>
+<tool_result>export async function startServer({ port = 8787 } = {}) { ... }</tool_result>
+The scheduler prefers the smallest sufficient node for a build task, keeping larger GPUs free for planning.
+Quantization trades a small amount of numerical precision for large reductions in memory. Sensitivity differs per tensor: embeddings and down-projections degrade fastest, so dynamic recipes protect them while compressing tolerant bulk weights harder.

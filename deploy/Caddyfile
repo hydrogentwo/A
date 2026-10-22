@@ -1,0 +1,4 @@
+# TLS in one line — point DNS, then your join link is https://a.example.com/?token=…
+a.example.com {
+	reverse_proxy 127.0.0.1:8787
+}

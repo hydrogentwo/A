@@ -1,0 +1,25 @@
+{
+  "name": "a-harness",
+  "version": "0.1.0",
+  "description": "A — one CLI harness + browser cluster combining the best of Pi, Octomind, jcode, OpenCode and DeepSeek Harness. Runs the skills/MCP/plugins of every known harness.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "a": "./bin/a.mjs"
+  },
+  "scripts": {
+    "start": "node bin/a.mjs serve",
+    "test": "node --test test/*.test.mjs",
+    "build:wasm": "./scripts/build-wasm-agent.sh",
+    "smoke": "node bin/a.mjs compat scan examples/demo && node bin/a.mjs run \"create hello.txt saying hi from A\" --provider demo --cwd /tmp/a-smoke --yes"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.28.20"
+  }
+}

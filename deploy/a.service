@@ -1,0 +1,12 @@
+[Unit]
+Description=A harness VPS coordinator
+After=network.target
+[Service]
+WorkingDirectory=/opt/a
+ExecStart=/usr/bin/node bin/a.mjs serve --port 8787
+Environment=A_DATA=/opt/a/.a-data
+EnvironmentFile=-/opt/a/.env
+Restart=always
+User=a
+[Install]
+WantedBy=multi-user.target
